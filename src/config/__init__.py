@@ -1,0 +1,7 @@
+MODEL_NAME = "llama3-8b-8192"
+
+PERSIST_DIRECTORY = "data/chroma_db"
+
+CHUNK_SIZE = 500
+
+CHUNK_OVERLAP = 100
