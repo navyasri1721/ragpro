@@ -12,13 +12,10 @@ class DoclingLoader:
         doc = result.document
 
         text = ""
-
-        # TEXT BLOCKS
         for block in doc.blocks:
             if hasattr(block, "text"):
                 text += block.text + "\n"
 
-        # TABLES
         for table in doc.tables:
             text += str(table) + "\n"
 
