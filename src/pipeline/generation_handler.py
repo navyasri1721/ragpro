@@ -1,54 +1,91 @@
 class GenerationHandler:
 
-    def __init__(self, llm, memory):
+    def __init__(
+
+        self,
+
+        llm,
+
+        memory
+    ):
+
         self.llm = llm
+
         self.memory = memory
+
         self.next_handler = None
 
-    # =========================================
-    # CHAIN SETUP
-    # =========================================
-    def set_next(self, handler):
+    # =====================================================
+    # CHAINING
+    # =====================================================
+
+    def set_next(
+
+        self,
+
+        handler
+    ):
+
         self.next_handler = handler
+
         return handler
 
-    # =========================================
-    # MAIN HANDLE FUNCTION
-    # =========================================
-    def handle(self, data):
+    # =====================================================
+    # HANDLE
+    # =====================================================
 
-        question = data.get("question", "")
-        docs = data.get("docs", [])
+    def handle(
 
-        # If next handler exists, process chain first
-        if self.next_handler:
-            result = self.next_handler.handle(data)
-            docs = result.get("docs", docs)
-            question = result.get("question", question)
+        self,
 
-        # =========================================
-        # BUILD CONTEXT (FROM RETRIEVED DOCS)
-        # =========================================
+        data
+    ):
+
+        question = data.get(
+            "question",
+            ""
+        )
+
+        docs = data.get(
+            "docs",
+            []
+        )
+
+        # =================================================
+        # BUILD CONTEXT
+        # =================================================
+
         context = "\n\n".join(
+
             [
+
                 doc.page_content
+
                 for doc in docs
             ]
         )
 
-        # =========================================
-        # 🔥 STRICT PROMPT (IMPORTANT FIX)
-        # =========================================
+        # =================================================
+        # IMPROVED PROMPT
+        # =================================================
+
         prompt = f"""
-You are a strict document-based QA assistant.
+You are an advanced document QA assistant.
+
+You MUST answer ONLY from the provided context.
 
 RULES:
-- Use ONLY the given context
-- Do NOT use external knowledge
-- If answer is not in context, reply exactly: Not found in document
-- Do NOT explain anything
-- Do NOT add extra text, reasoning, or assumptions
-- Give ONLY the final answer (short and direct)
+- Use retrieved context carefully
+- Tables may contain the answer
+- Infer simple table relationships if obvious
+- For example:
+    - bond = 0 means bond-free
+    - backlog = 0 means no backlogs allowed
+- Answer comparison questions carefully
+- Answer ranking/filtering questions carefully
+- Keep answers concise
+- If truly absent, say:
+  Not found in document
 
 CONTEXT:
 {context}
@@ -59,26 +96,33 @@ QUESTION:
 ANSWER:
 """
 
-        # =========================================
-        # LLM CALL
-        # =========================================
-        response = self.llm.invoke(prompt)
+        # =================================================
+        # LLM
+        # =================================================
 
-        answer = response.content if hasattr(response, "content") else str(response)
+        response = self.llm.invoke(
+            prompt
+        )
 
-        # =========================================
-        # FINAL SAFETY CLEANUP
-        # =========================================
+        answer = (
+
+            response.content
+
+            if hasattr(
+                response,
+                "content"
+            )
+
+            else str(response)
+        )
+
         answer = answer.strip()
 
-        if "\n" in answer:
-            answer = answer.split("\n")[0]
-
-        # =========================================
-        # RETURN RESULT
-        # =========================================
         return {
+
             "answer": answer,
+
             "docs": docs,
+
             "question": question
         }

@@ -1,15 +1,26 @@
 from src.pipeline.base_handler import BaseHandler
 
-# =====================================================
-# IMPROVED RERANK HANDLER
-# =====================================================
+from src.reranker.reranker import (
+    rerank_documents
+)
+
+
+# =========================================================
+# RERANK HANDLER
+# =========================================================
 
 class RerankHandler(BaseHandler):
 
     def handle(self, data):
 
         docs = data.get("docs", [])
-        query = data.get("rewritten_query", "").lower()
+
+        query = data.get(
+
+            "rewritten_query",
+
+            data.get("question", "")
+        )
 
         if not docs:
 
@@ -18,76 +29,18 @@ class RerankHandler(BaseHandler):
             return super().handle(data)
 
         # =================================================
-        # STEP 1: SCORE DOCUMENTS
+        # CROSS ENCODER RERANKING
         # =================================================
 
-        scored_docs = []
+        reranked_docs = rerank_documents(
 
-        for doc in docs:
+            query,
 
-            content = doc.page_content.lower()
+            docs,
 
-            source = doc.metadata.get("source", "unknown")
-
-            # -----------------------------------------
-            # scoring logic (simple but effective)
-            # -----------------------------------------
-
-            score = 0
-
-            # keyword match boost
-            if query in content:
-                score += 3
-
-            # partial match boost
-            query_words = query.split()
-
-            for word in query_words:
-
-                if word in content:
-                    score += 1
-
-            # smaller penalty for duplicates
-            score -= len(content) * 0.0001
-
-            scored_docs.append((score, doc))
-
-        # =================================================
-        # STEP 2: SORT BY SCORE
-        # =================================================
-
-        scored_docs.sort(
-            key=lambda x: x[0],
-            reverse=True
+            top_k=6
         )
 
-        # =================================================
-        # STEP 3: SOURCE DIVERSITY (IMPORTANT FIX)
-        # =================================================
-
-        seen_sources = set()
-
-        final_docs = []
-
-        for score, doc in scored_docs:
-
-            source = doc.metadata.get("source", "unknown")
-
-            # ensure diversity across documents
-            if source in seen_sources:
-                continue
-
-            seen_sources.add(source)
-
-            final_docs.append(doc)
-
-            if len(final_docs) == 5:
-                break
-
-        # =================================================
-        # FINAL OUTPUT
-        # =================================================
-
-        data["docs"] = final_docs
+        data["docs"] = reranked_docs
 
         return super().handle(data)

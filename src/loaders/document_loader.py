@@ -1,51 +1,96 @@
 import os
+
 from langchain_core.documents import Document
 
 import pytesseract
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+from src.loaders.table_loader import (
+    extract_tables_from_pdf
+)
 
 
 # =====================================================
 # TXT LOADER
 # =====================================================
+
 class TXTLoader:
+
     def load(self, path):
+
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+
+            with open(
+
+                path,
+
+                "r",
+
+                encoding="utf-8",
+
+                errors="ignore"
+
+            ) as f:
+
                 return f.read()
+
         except:
+
             return ""
 
 
 # =====================================================
 # DOCX LOADER
 # =====================================================
+
 class DOCXLoader:
+
     def load(self, path):
+
         try:
-            from docx import Document as DocxDocument
+
+            from docx import (
+                Document as DocxDocument
+            )
+
             doc = DocxDocument(path)
-            return "\n".join([p.text for p in doc.paragraphs])
+
+            return "\n".join([
+
+                p.text
+
+                for p in doc.paragraphs
+            ])
+
         except:
+
             return ""
 
 
 # =====================================================
-# CSV LOADER (IMPROVED)
+# CSV LOADER
 # =====================================================
+
 class CSVLoader:
+
     def load(self, path):
+
         try:
+
             import pandas as pd
+
             df = pd.read_csv(path)
+
             return df.to_string(index=False)
+
         except:
+
             return ""
 
 
 # =====================================================
-# PDF LOADER (FIXED: TEXT + TABLE + OCR)
+# PDF LOADER
 # =====================================================
+
 class PDFLoader:
 
     def load(self, path):
@@ -53,63 +98,76 @@ class PDFLoader:
         text = ""
 
         try:
-            import fitz  # PyMuPDF
-            import pdfplumber
-            from pdf2image import convert_from_path
 
-            # =========================================
-            # 1. TEXT EXTRACTION (PyMuPDF)
-            # =========================================
+            import fitz
+
+            from pdf2image import (
+                convert_from_path
+            )
+
             doc = fitz.open(path)
 
             for page_num, page in enumerate(doc):
+
                 page_text = page.get_text()
+
+                # =====================================
+                # NORMAL TEXT
+                # =====================================
+
                 if page_text:
-                    text += f"\nPAGE_{page_num + 1}:\n{page_text}"
 
-            # =========================================
-            # 2. TABLE EXTRACTION (STRUCTURED)
-            # =========================================
-            try:
-                with pdfplumber.open(path) as pdf:
-                    for page_num, page in enumerate(pdf.pages):
+                    text += f"""
 
-                        tables = page.extract_tables()
+PAGE_{page_num + 1}:
 
-                        for table in tables:
-                            if table:
-                                text += f"\n\nTABLE_PAGE_{page_num + 1}:\n"
+{page_text}
+"""
 
-                                for row in table:
-                                    clean_row = [
-                                        str(cell).strip() if cell else ""
-                                        for cell in row
-                                    ]
-                                    text += " | ".join(clean_row) + "\n"
+                # =====================================
+                # OCR PER PAGE
+                # =====================================
 
-            except Exception as e:
-                print("TABLE ERROR:", e)
+                if len(page_text.strip()) < 100:
 
-            # =========================================
-            # 3. OCR FALLBACK (ONLY IF LOW TEXT)
-            # =========================================
-            if len(text.strip()) < 200:
+                    try:
 
-                try:
-                    images = convert_from_path(path)
+                        images = convert_from_path(
 
-                    ocr_text = ""
+                            path,
 
-                    for img in images:
-                        ocr_text += pytesseract.image_to_string(img)
+                            first_page=page_num + 1,
 
-                    text += "\nOCR_TEXT:\n" + ocr_text
+                            last_page=page_num + 1
+                        )
 
-                except Exception as e:
-                    print("OCR ERROR:", e)
+                        for img in images:
+
+                            ocr_text = (
+                                pytesseract.image_to_string(
+                                    img
+                                )
+                            )
+
+                            text += f"""
+
+OCR_PAGE_{page_num + 1}:
+
+{ocr_text}
+"""
+
+                    except Exception as e:
+
+                        print(
+                            f"OCR PAGE ERROR: {e}"
+                        )
 
         except Exception as e:
-            print("PDF LOAD ERROR:", e)
+
+            print(
+                f"PDF LOAD ERROR: {e}"
+            )
+
             return ""
 
         return text
@@ -118,30 +176,50 @@ class PDFLoader:
 # =====================================================
 # GET LOADER
 # =====================================================
+
 def get_loader(ext):
+
     return {
+
         ".pdf": PDFLoader(),
+
         ".txt": TXTLoader(),
+
         ".docx": DOCXLoader(),
+
         ".csv": CSVLoader()
+
     }.get(ext)
 
 
 # =====================================================
-# PROCESS FILES (FIXED + SAFE + CLEAN DOCS)
+# PROCESS FILES
 # =====================================================
+
 def process_uploaded_files(files):
 
     documents = []
-    os.makedirs("data/uploads", exist_ok=True)
+
+    os.makedirs(
+        "data/uploads",
+        exist_ok=True
+    )
 
     for file in files:
 
         try:
+
             file_bytes = file.getvalue()
-            path = os.path.join("data/uploads", file.name)
+
+            path = os.path.join(
+
+                "data/uploads",
+
+                file.name
+            )
 
             with open(path, "wb") as f:
+
                 f.write(file_bytes)
 
             ext = os.path.splitext(path)[1].lower()
@@ -151,33 +229,65 @@ def process_uploaded_files(files):
             if not loader:
                 continue
 
+            # =========================================
+            # NORMAL DOCUMENT TEXT
+            # =========================================
+
             content = loader.load(path)
 
-            if not content:
-                continue
+            if content:
 
-            content = str(content).strip()
+                content = str(content).strip()
 
-            if len(content) < 10:
-                continue
+                if len(content) > 20:
+
+                    documents.append(
+
+                        Document(
+
+                            page_content=content,
+
+                            metadata={
+
+                                "source": file.name,
+
+                                "type": ext.replace(".", ""),
+
+                                "length": len(content)
+                            }
+                        )
+                    )
 
             # =========================================
-            # IMPORTANT: BETTER METADATA FOR RETRIEVAL
+            # TABLE EXTRACTION
             # =========================================
-            documents.append(
-                Document(
-                    page_content=content,
-                    metadata={
-                        "source": file.name,
-                        "type": ext.replace(".", ""),
-                        "length": len(content)
-                    }
+
+            if ext == ".pdf":
+
+                table_docs = (
+                    extract_tables_from_pdf(
+
+                        file_bytes,
+
+                        file.name
+                    )
                 )
-            )
+
+                documents.extend(
+                    table_docs
+                )
 
         except Exception as e:
-            print("FILE ERROR:", file.name, e)
 
-    print("[DEBUG] FINAL DOC COUNT:", len(documents))
+            print(
+                "FILE ERROR:",
+                file.name,
+                e
+            )
+
+    print(
+        "[DEBUG] FINAL DOC COUNT:",
+        len(documents)
+    )
 
     return documents

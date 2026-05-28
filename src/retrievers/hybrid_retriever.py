@@ -1,5 +1,9 @@
 from langchain_community.retrievers import BM25Retriever
-import streamlit as st
+
+
+# =========================================================
+# HYBRID RETRIEVER
+# =========================================================
 
 class HybridRetriever:
 
@@ -13,7 +17,12 @@ class HybridRetriever:
     ):
 
         self.bm25_retriever = bm25_retriever
+
         self.chroma_retriever = chroma_retriever
+
+    # =====================================================
+    # MAIN RETRIEVAL
+    # =====================================================
 
     def get_relevant_documents(
 
@@ -22,50 +31,54 @@ class HybridRetriever:
         query
     ):
 
-        # =====================================
-        # NORMAL RETRIEVAL
-        # =====================================
+        # =================================================
+        # BM25 RETRIEVAL
+        # =================================================
 
-        bm25_docs = (
-            self.bm25_retriever.invoke(query)
+        bm25_docs = self.bm25_retriever.invoke(
+            query
         )
 
-        chroma_docs = (
-            self.chroma_retriever.invoke(query)
+        # =================================================
+        # VECTOR RETRIEVAL
+        # =================================================
+
+        chroma_docs = self.chroma_retriever.invoke(
+            query
         )
+
+        # =================================================
+        # MERGE
+        # =================================================
 
         all_docs = bm25_docs + chroma_docs
 
-        # =====================================
-        # FILTER USING ACTIVE SOURCE
-        # =====================================
+        # =================================================
+        # REMOVE DUPLICATES
+        # =================================================
 
-        active_source = st.session_state.get(
-            "active_source",
-            None
-        )
+        unique_docs = []
 
-        if active_source:
+        seen = set()
 
-            filtered_docs = []
+        for doc in all_docs:
 
-            for doc in all_docs:
+            content_key = (
+                doc.page_content[:300]
+            )
 
-                source = doc.metadata.get(
-                    "source",
-                    ""
-                )
+            if content_key not in seen:
 
-                if active_source in source:
+                unique_docs.append(doc)
 
-                    filtered_docs.append(doc)
+                seen.add(content_key)
 
-            if filtered_docs:
+        return unique_docs[:10]
 
-                return filtered_docs[:5]
 
-        return all_docs[:5]
-
+# =========================================================
+# CREATE HYBRID RETRIEVER
+# =========================================================
 
 def create_hybrid_retriever(
 
@@ -78,7 +91,7 @@ def create_hybrid_retriever(
         documents
     )
 
-    bm25.k = 4
+    bm25.k = 8
 
     return HybridRetriever(
 

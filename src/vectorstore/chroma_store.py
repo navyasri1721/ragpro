@@ -1,81 +1,150 @@
 from langchain_chroma import Chroma
-from src.config.api_config import PERSIST_DIRECTORY
 
-# =====================================================
-# CREATE CHROMA VECTORSTORE (FIXED + SAFE)
-# =====================================================
+from langchain_core.documents import (
+    Document
+)
 
-def create_chroma_vectorstore(documents, embeddings):
+from src.config.api_config import (
+    PERSIST_DIRECTORY
+)
 
-    # =================================================
-    # STEP 1: CLEAN + VALIDATE DOCUMENTS
-    # =================================================
+
+# =========================================================
+# CREATE VECTORSTORE
+# =========================================================
+
+def create_chroma_vectorstore(
+
+    documents,
+
+    embeddings
+):
+
+    vectorstore = Chroma(
+
+        persist_directory=PERSIST_DIRECTORY,
+
+        embedding_function=embeddings
+    )
+
+    # =====================================================
+    # DELETE OLD FILES
+    # =====================================================
+
+    sources = set()
+
+    for doc in documents:
+
+        source = doc.metadata.get(
+            "source"
+        )
+
+        if source:
+
+            sources.add(source)
+
+    for source in sources:
+
+        try:
+
+            existing = vectorstore.get(
+
+                where={
+                    "source": source
+                }
+            )
+
+            ids = existing.get(
+                "ids",
+                []
+            )
+
+            if ids:
+
+                vectorstore.delete(
+                    ids=ids
+                )
+
+        except Exception as e:
+
+            print(
+                f"[DEBUG] DELETE ERROR: {e}"
+            )
+
+    # =====================================================
+    # SAFE INSERT
+    # =====================================================
 
     cleaned_docs = []
 
     for doc in documents:
 
-        # ensure page_content exists
-        if not hasattr(doc, "page_content"):
-            continue
+        try:
 
-        content = doc.page_content
+            metadata = {}
 
-        if content and content.strip():
+            for k, v in doc.metadata.items():
 
-            # ensure metadata exists
-            if not hasattr(doc, "metadata") or doc.metadata is None:
-                doc.metadata = {}
+                metadata[str(k)] = str(v)
 
-            # enforce source tracking
-            doc.metadata["source"] = doc.metadata.get(
-                "source",
-                "unknown"
+            cleaned_docs.append(
+
+                Document(
+
+                    page_content=str(
+                        doc.page_content
+                    ),
+
+                    metadata=metadata
+                )
             )
 
-            cleaned_docs.append(doc)
+        except Exception as e:
 
-    # =================================================
-    # STEP 2: VALIDATION CHECK (IMPORTANT)
-    # =================================================
+            print(
+                f"[DEBUG] CLEAN ERROR: {e}"
+            )
 
-    if len(cleaned_docs) == 0:
+    print(
+        f"[DEBUG] FINAL DOCS: {len(cleaned_docs)}"
+    )
 
-        raise ValueError(
-            "No valid documents found for vectorstore creation."
-        )
-
-    # =================================================
-    # STEP 3: CREATE VECTORSTORE
-    # =================================================
-
-    vectorstore = Chroma.from_documents(
-        documents=cleaned_docs,
-        embedding=embeddings,
-        persist_directory=PERSIST_DIRECTORY
+    vectorstore.add_documents(
+        cleaned_docs
     )
 
     return vectorstore
 
 
-# =====================================================
-# LOAD EXISTING VECTORSTORE
-# =====================================================
+# =========================================================
+# LOAD VECTORSTORE
+# =========================================================
 
-def load_chroma_vectorstore(embeddings):
+def load_chroma_vectorstore(
+
+    embeddings
+):
 
     return Chroma(
+
         persist_directory=PERSIST_DIRECTORY,
+
         embedding_function=embeddings
     )
 
 
-# =====================================================
-# RETRIEVER WRAPPER
-# =====================================================
+# =========================================================
+# RETRIEVER
+# =========================================================
 
-def get_chroma_retriever(vectorstore):
+def get_chroma_retriever(
+
+    vectorstore
+):
 
     return vectorstore.as_retriever(
-        search_kwargs={"k": 4}
+
+        search_kwargs={
+            "k": 25
+        }
     )

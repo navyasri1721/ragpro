@@ -1,19 +1,23 @@
 class QueryRewriteHandler:
 
-    def __init__(self, llm, memory):
+    def __init__(
+
+        self,
+
+        llm,
+
+        memory
+    ):
 
         self.llm = llm
-        self.memory = memory
 
-        # =====================================
-        # IMPORTANT FIX
-        # =====================================
+        self.memory = memory
 
         self.next_handler = None
 
-    # =====================================
-    # CHAINING
-    # =====================================
+    # =====================================================
+    # SET NEXT
+    # =====================================================
 
     def set_next(self, handler):
 
@@ -21,9 +25,9 @@ class QueryRewriteHandler:
 
         return handler
 
-    # =====================================
+    # =====================================================
     # HANDLE
-    # =====================================
+    # =====================================================
 
     def handle(self, data):
 
@@ -32,20 +36,18 @@ class QueryRewriteHandler:
             ""
         )
 
-        # =====================================
-        # SIMPLE CLEANUP
-        # =====================================
-
         rewritten_question = (
             question.strip()
-            .lower()
         )
 
-        data["question"] = rewritten_question
+        # IMPORTANT FIX
+        data["rewritten_query"] = (
+            rewritten_question
+        )
 
-        # =====================================
+        # =================================================
         # NEXT HANDLER
-        # =====================================
+        # =================================================
 
         if self.next_handler:
 

@@ -10,13 +10,16 @@ from langchain_groq import ChatGroq
 from langchain_core.documents import (
     Document
 )
+
 import pytesseract
 
 # =========================================================
 # OCR CONFIG
 # =========================================================
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = (
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
 
 # =========================================================
 # PROJECT IMPORTS
@@ -31,8 +34,11 @@ from src.singleton.embedding_singleton import (
 )
 
 from src.vectorstore.chroma_store import (
+
     create_chroma_vectorstore,
+
     load_chroma_vectorstore,
+
     get_chroma_retriever
 )
 
@@ -73,18 +79,26 @@ from src.pipeline.generation_handler import (
 # =========================================================
 
 st.set_page_config(
+
     page_title="Advanced Hybrid RAG",
+
     layout="wide"
 )
 
-st.title("Advanced Hybrid RAG Chatbot")
+st.title(
+    "Advanced Hybrid RAG Chatbot"
+)
 
 # =========================================================
 # LLM
 # =========================================================
 
 llm = ChatGroq(
-    groq_api_key=st.secrets["GROQ_API_KEY"],
+
+    groq_api_key=st.secrets[
+        "GROQ_API_KEY"
+    ],
+
     model_name="llama-3.3-70b-versatile"
 )
 
@@ -92,7 +106,9 @@ llm = ChatGroq(
 # EMBEDDINGS
 # =========================================================
 
-embeddings = EmbeddingSingleton.get_instance()
+embeddings = (
+    EmbeddingSingleton.get_instance()
+)
 
 # =========================================================
 # MEMORY
@@ -105,154 +121,303 @@ memory = get_memory()
 # =========================================================
 
 if "messages" not in st.session_state:
+
     st.session_state.messages = []
 
 if "retriever" not in st.session_state:
+
     st.session_state.retriever = None
 
 if "processed_files" not in st.session_state:
+
     st.session_state.processed_files = []
 
 # =========================================================
-# LOAD EXISTING CHROMADB
+# AUTO LOAD PERSISTENT CHROMADB
 # =========================================================
 
-if (
-    os.path.exists(PERSIST_DIRECTORY)
-    and st.session_state.retriever is None
-):
+if st.session_state.retriever is None:
 
     try:
-        vectorstore = load_chroma_vectorstore(embeddings)
 
-        all_docs = vectorstore.get()
+        if os.path.exists(PERSIST_DIRECTORY):
 
-        documents = []
+            vectorstore = load_chroma_vectorstore(
+                embeddings
+            )
 
-        if all_docs and all_docs.get("documents"):
+            # =====================================
+            # CHECK IF DB HAS DATA
+            # =====================================
 
-            for i in range(len(all_docs["documents"])):
-                documents.append(
-                    Document(
-                        page_content=all_docs["documents"][i],
-                        metadata=all_docs["metadatas"][i]
+            db_data = vectorstore.get()
+
+            if (
+
+                db_data
+
+                and
+
+                len(
+                    db_data["documents"]
+                ) > 0
+            ):
+
+                documents = []
+
+                for i in range(
+
+                    len(
+                        db_data["documents"]
+                    )
+                ):
+
+                    try:
+
+                        doc = Document(
+
+                            page_content=db_data[
+                                "documents"
+                            ][i],
+
+                            metadata=db_data[
+                                "metadatas"
+                            ][i]
+                        )
+
+                        documents.append(
+                            doc
+                        )
+
+                    except:
+                        pass
+
+                chroma_retriever = (
+                    get_chroma_retriever(
+                        vectorstore
                     )
                 )
 
-        chroma_retriever = get_chroma_retriever(vectorstore)
+                retriever = (
+                    create_hybrid_retriever(
 
-        retriever = create_hybrid_retriever(
-            documents,
-            chroma_retriever
-        )
+                        documents,
 
-        st.session_state.retriever = retriever
+                        chroma_retriever
+                    )
+                )
 
-        st.sidebar.success("Persistent ChromaDB Loaded")
+                st.session_state.retriever = (
+                    retriever
+                )
+
+                st.sidebar.success(
+                    f"Loaded Persistent DB ({len(documents)} chunks)"
+                )
+
+            else:
+
+                st.sidebar.warning(
+                    "Persistent DB empty."
+                )
 
     except Exception as e:
-        st.sidebar.error(f"Database Load Error: {e}")
+
+        st.sidebar.error(
+            f"DB Load Error: {e}"
+        )
 
 # =========================================================
 # SIDEBAR
 # =========================================================
 
-st.sidebar.title("Upload Documents")
-st.sidebar.write("Supported Formats:")
-st.sidebar.write("PDF | DOCX | TXT | CSV")
+st.sidebar.title(
+    "Upload Documents"
+)
+
+st.sidebar.write(
+    "Supported Formats:"
+)
+
+st.sidebar.write(
+    "PDF | DOCX | TXT | CSV"
+)
 
 uploaded_files = st.sidebar.file_uploader(
+
     "Upload Files",
-    type=["pdf", "docx", "txt", "csv"],
+
+    type=[
+        "pdf",
+        "docx",
+        "txt",
+        "csv"
+    ],
+
     accept_multiple_files=True
 )
 
 # =========================================================
-# PROCESS DOCUMENTS (DEBUG FIX ADDED ONLY)
+# PROCESS DOCUMENTS
 # =========================================================
 
 if uploaded_files:
 
-    uploaded_names = sorted([file.name for file in uploaded_files])
+    uploaded_names = sorted([
 
-    if uploaded_names != st.session_state.processed_files:
+        file.name
 
-        with st.spinner("Processing Documents..."):
+        for file in uploaded_files
+    ])
 
-            # =====================================
-            # LOAD DOCUMENTS
-            # =====================================
+    if (
 
-            docs = process_uploaded_files(uploaded_files)
+        uploaded_names
 
-            # 🔥 DEBUG 1 (CRITICAL)
-            st.write("DEBUG - Raw Docs Count:", len(docs))
+        != st.session_state.processed_files
+    ):
 
-            if len(docs) == 0:
-                st.error("❌ Loader returned EMPTY docs list")
-                st.warning("👉 Problem is in OCR/PDF/DOCX loader, NOT app.py")
-                st.stop()
+        with st.spinner(
+            "Processing documents..."
+        ):
 
             # =====================================
-            # SPLIT DOCUMENTS
+            # LOAD
             # =====================================
 
-            split_docs = split_documents(docs)
-
-            # 🔥 DEBUG 2
-            st.write("DEBUG - Split Docs Count:", len(split_docs))
-
-            if len(split_docs) == 0:
-                st.error("❌ Splitting produced 0 chunks")
-                st.stop()
-
-            # =====================================
-            # VECTORSTORE
-            # =====================================
-
-            vectorstore = create_chroma_vectorstore(
-                split_docs,
-                embeddings
+            docs = process_uploaded_files(
+                uploaded_files
             )
+
+            print(
+                f"[DEBUG] RAW DOCS: {len(docs)}"
+            )
+
+            # =====================================
+            # SPLIT
+            # =====================================
+
+            split_docs = split_documents(
+                docs
+            )
+
+            print(
+                f"[DEBUG] SPLIT DOCS: {len(split_docs)}"
+            )
+
+            # =====================================
+            # CREATE / UPDATE VECTORSTORE
+            # =====================================
+
+            vectorstore = (
+                create_chroma_vectorstore(
+
+                    split_docs,
+
+                    embeddings
+                )
+            )
+
+            # =====================================
+            # LOAD ALL DOCS FROM DB
+            # =====================================
+
+            db_data = vectorstore.get()
+
+            documents = []
+
+            for i in range(
+
+                len(
+                    db_data["documents"]
+                )
+            ):
+
+                try:
+
+                    documents.append(
+
+                        Document(
+
+                            page_content=db_data[
+                                "documents"
+                            ][i],
+
+                            metadata=db_data[
+                                "metadatas"
+                            ][i]
+                        )
+                    )
+
+                except:
+                    pass
 
             # =====================================
             # RETRIEVER
             # =====================================
 
-            chroma_retriever = get_chroma_retriever(vectorstore)
-
-            retriever = create_hybrid_retriever(
-                split_docs,
-                chroma_retriever
+            chroma_retriever = (
+                get_chroma_retriever(
+                    vectorstore
+                )
             )
 
-            st.session_state.retriever = retriever
-            st.session_state.processed_files = uploaded_names
+            retriever = (
+                create_hybrid_retriever(
 
-        st.success("Documents Processed Successfully")
+                    documents,
+
+                    chroma_retriever
+                )
+            )
+
+            st.session_state.retriever = (
+                retriever
+            )
+
+            st.session_state.processed_files = (
+                uploaded_names
+            )
+
+        st.success(
+            "Documents processed successfully."
+        )
 
 # =========================================================
 # CLEAR CHAT
 # =========================================================
 
-if st.sidebar.button("Clear Chat"):
+if st.sidebar.button(
+    "Clear Chat"
+):
+
     st.session_state.messages = []
+
     memory.clear()
+
     st.rerun()
 
 # =========================================================
-# DISPLAY CHAT HISTORY
+# CHAT HISTORY
 # =========================================================
 
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+
+    with st.chat_message(
+        message["role"]
+    ):
+
+        st.markdown(
+            message["content"]
+        )
 
 # =========================================================
 # USER INPUT
 # =========================================================
 
-question = st.chat_input("Ask questions from uploaded documents...")
+question = st.chat_input(
+    "Ask questions from documents..."
+)
 
 # =========================================================
 # QUESTION PROCESSING
@@ -261,26 +426,59 @@ question = st.chat_input("Ask questions from uploaded documents...")
 if question:
 
     st.session_state.messages.append({
+
         "role": "user",
+
         "content": question
     })
 
     with st.chat_message("user"):
+
         st.markdown(question)
 
     with st.chat_message("assistant"):
 
         if st.session_state.retriever is None:
-            st.warning("Please upload documents first.")
+
+            st.warning(
+                "No documents available in database."
+            )
 
         else:
 
             try:
 
-                rewrite_handler = QueryRewriteHandler(llm, memory)
-                retrieval_handler = RetrievalHandler(st.session_state.retriever)
-                rerank_handler = RerankHandler()
-                generation_handler = GenerationHandler(llm, memory)
+                # =================================
+                # HANDLERS
+                # =================================
+
+                rewrite_handler = (
+                    QueryRewriteHandler(
+                        llm,
+                        memory
+                    )
+                )
+
+                retrieval_handler = (
+                    RetrievalHandler(
+                        st.session_state.retriever
+                    )
+                )
+
+                rerank_handler = (
+                    RerankHandler()
+                )
+
+                generation_handler = (
+                    GenerationHandler(
+                        llm,
+                        memory
+                    )
+                )
+
+                # =================================
+                # CHAIN
+                # =================================
 
                 rewrite_handler.set_next(
                     retrieval_handler
@@ -290,45 +488,97 @@ if question:
                     generation_handler
                 )
 
+                # =================================
+                # RUN
+                # =================================
+
                 result = rewrite_handler.handle({
+
                     "question": question
                 })
 
                 answer = result["answer"]
-                docs = result.get("docs", [])
+
+                docs = result.get(
+                    "docs",
+                    []
+                )
 
             except Exception as e:
-                st.error(f"Pipeline Error: {e}")
+
+                st.error(
+                    f"Pipeline Error: {e}"
+                )
+
                 st.stop()
 
-            if not docs:
-                answer = "No relevant information found."
+            # =================================
+            # SAVE MEMORY
+            # =================================
 
             memory.save_context(
+
                 {"input": question},
+
                 {"output": answer}
             )
 
+            # =================================
+            # SHOW ANSWER
+            # =================================
+
             st.markdown(answer)
+
+            # =================================
+            # SOURCES
+            # =================================
 
             if docs:
 
-                st.markdown("### Sources")
+                st.markdown(
+                    "### Sources"
+                )
 
                 shown_sources = set()
 
-                for doc in docs[:3]:
+                for doc in docs[:5]:
 
-                    source = doc.metadata.get("source", "Unknown File")
-                    page = doc.metadata.get("page", "N/A")
+                    source = doc.metadata.get(
 
-                    text = f"{source} — Page {page}"
+                        "source",
 
-                    if text not in shown_sources:
-                        st.markdown(f"- {text}")
-                        shown_sources.add(text)
+                        "Unknown"
+                    )
+
+                    page = doc.metadata.get(
+
+                        "page",
+
+                        "N/A"
+                    )
+
+                    source_text = (
+                        f"{source} — Page {page}"
+                    )
+
+                    if (
+
+                        source_text
+
+                        not in shown_sources
+                    ):
+
+                        st.markdown(
+                            f"- {source_text}"
+                        )
+
+                        shown_sources.add(
+                            source_text
+                        )
 
     st.session_state.messages.append({
+
         "role": "assistant",
+
         "content": answer
     })
