@@ -1,84 +1,56 @@
-import streamlit as st
-
-from src.pipeline.base_handler import BaseHandler
-
-
-class QueryRewriteHandler(BaseHandler):
+class QueryRewriteHandler:
 
     def __init__(self, llm, memory):
-
-        super().__init__()
 
         self.llm = llm
         self.memory = memory
 
         # =====================================
-        # SESSION STATE
+        # IMPORTANT FIX
         # =====================================
 
-        if "last_full_question" not in st.session_state:
+        self.next_handler = None
 
-            st.session_state.last_full_question = ""
+    # =====================================
+    # CHAINING
+    # =====================================
+
+    def set_next(self, handler):
+
+        self.next_handler = handler
+
+        return handler
+
+    # =====================================
+    # HANDLE
+    # =====================================
 
     def handle(self, data):
 
-        question = data["question"]
-
-        lower_q = question.lower()
-
-        # =====================================
-        # FOLLOW-UP DETECTION
-        # =====================================
-
-        followup_words = [
-
-            "its",
-            "their",
-            "those",
-            "types",
-            "advantages",
-            "disadvantages"
-
-        ]
-
-        is_followup = any(
-
-            word in lower_q
-
-            for word in followup_words
-
+        question = data.get(
+            "question",
+            ""
         )
 
         # =====================================
-        # REWRITE FOLLOW-UP
+        # SIMPLE CLEANUP
         # =====================================
 
-        if (
+        rewritten_question = (
+            question.strip()
+            .lower()
+        )
 
-            is_followup
+        data["question"] = rewritten_question
 
-            and st.session_state.last_full_question
+        # =====================================
+        # NEXT HANDLER
+        # =====================================
 
-        ):
+        if self.next_handler:
 
-            rewritten_query = (
-
-                f"{question} of "
-                f"{st.session_state.last_full_question}"
-
+            return self.next_handler.handle(
+                data
             )
 
-        else:
-
-            rewritten_query = question
-
-            # store latest complete topic
-            st.session_state.last_full_question = question
-
-        # =====================================
-        # SAVE REWRITTEN QUERY
-        # =====================================
-
-        data["rewritten_query"] = rewritten_query
-
-        return super().handle(data)
+        return data

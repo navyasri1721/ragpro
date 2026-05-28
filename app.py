@@ -10,6 +10,13 @@ from langchain_groq import ChatGroq
 from langchain_core.documents import (
     Document
 )
+import pytesseract
+
+# =========================================================
+# OCR CONFIG
+# =========================================================
+
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # =========================================================
 # PROJECT IMPORTS
@@ -66,26 +73,18 @@ from src.pipeline.generation_handler import (
 # =========================================================
 
 st.set_page_config(
-
     page_title="Advanced Hybrid RAG",
-
     layout="wide"
 )
 
-st.title(
-    "Advanced Hybrid RAG Chatbot"
-)
+st.title("Advanced Hybrid RAG Chatbot")
 
 # =========================================================
 # LLM
 # =========================================================
 
 llm = ChatGroq(
-
-    groq_api_key=st.secrets[
-        "GROQ_API_KEY"
-    ],
-
+    groq_api_key=st.secrets["GROQ_API_KEY"],
     model_name="llama-3.3-70b-versatile"
 )
 
@@ -93,9 +92,7 @@ llm = ChatGroq(
 # EMBEDDINGS
 # =========================================================
 
-embeddings = (
-    EmbeddingSingleton.get_instance()
-)
+embeddings = EmbeddingSingleton.get_instance()
 
 # =========================================================
 # MEMORY
@@ -108,15 +105,12 @@ memory = get_memory()
 # =========================================================
 
 if "messages" not in st.session_state:
-
     st.session_state.messages = []
 
 if "retriever" not in st.session_state:
-
     st.session_state.retriever = None
 
 if "processed_files" not in st.session_state:
-
     st.session_state.processed_files = []
 
 # =========================================================
@@ -124,206 +118,126 @@ if "processed_files" not in st.session_state:
 # =========================================================
 
 if (
-
     os.path.exists(PERSIST_DIRECTORY)
-
     and st.session_state.retriever is None
 ):
 
     try:
-
-        vectorstore = (
-            load_chroma_vectorstore(
-                embeddings
-            )
-        )
+        vectorstore = load_chroma_vectorstore(embeddings)
 
         all_docs = vectorstore.get()
 
         documents = []
 
-        if (
+        if all_docs and all_docs.get("documents"):
 
-            all_docs
-
-            and all_docs["documents"]
-        ):
-
-            for i in range(
-
-                len(
-                    all_docs["documents"]
-                )
-            ):
-
-                doc = Document(
-
-                    page_content=all_docs[
-                        "documents"
-                    ][i],
-
-                    metadata=all_docs[
-                        "metadatas"
-                    ][i]
+            for i in range(len(all_docs["documents"])):
+                documents.append(
+                    Document(
+                        page_content=all_docs["documents"][i],
+                        metadata=all_docs["metadatas"][i]
+                    )
                 )
 
-                documents.append(doc)
+        chroma_retriever = get_chroma_retriever(vectorstore)
 
-        chroma_retriever = (
-            get_chroma_retriever(
-                vectorstore
-            )
+        retriever = create_hybrid_retriever(
+            documents,
+            chroma_retriever
         )
 
-        retriever = (
-            create_hybrid_retriever(
+        st.session_state.retriever = retriever
 
-                documents,
-
-                chroma_retriever
-            )
-        )
-
-        st.session_state.retriever = (
-            retriever
-        )
-
-        st.sidebar.success(
-            "Persistent ChromaDB Loaded"
-        )
+        st.sidebar.success("Persistent ChromaDB Loaded")
 
     except Exception as e:
-
-        st.sidebar.error(
-            f"Database Load Error: {e}"
-        )
+        st.sidebar.error(f"Database Load Error: {e}")
 
 # =========================================================
 # SIDEBAR
 # =========================================================
 
-st.sidebar.title(
-    "Upload Documents"
-)
-
-st.sidebar.write(
-    "Supported Formats:"
-)
-
-st.sidebar.write(
-    "PDF | DOCX | TXT | CSV"
-)
+st.sidebar.title("Upload Documents")
+st.sidebar.write("Supported Formats:")
+st.sidebar.write("PDF | DOCX | TXT | CSV")
 
 uploaded_files = st.sidebar.file_uploader(
-
     "Upload Files",
-
-    type=[
-        "pdf",
-        "docx",
-        "txt",
-        "csv"
-    ],
-
+    type=["pdf", "docx", "txt", "csv"],
     accept_multiple_files=True
 )
 
 # =========================================================
-# PROCESS DOCUMENTS
+# PROCESS DOCUMENTS (DEBUG FIX ADDED ONLY)
 # =========================================================
 
 if uploaded_files:
 
-    uploaded_names = sorted([
+    uploaded_names = sorted([file.name for file in uploaded_files])
 
-        file.name
+    if uploaded_names != st.session_state.processed_files:
 
-        for file in uploaded_files
-    ])
-
-    if (
-
-        uploaded_names
-
-        != st.session_state.processed_files
-    ):
-
-        with st.spinner(
-            "Processing Documents..."
-        ):
+        with st.spinner("Processing Documents..."):
 
             # =====================================
             # LOAD DOCUMENTS
             # =====================================
 
-            docs = process_uploaded_files(
-                uploaded_files
-            )
+            docs = process_uploaded_files(uploaded_files)
+
+            # 🔥 DEBUG 1 (CRITICAL)
+            st.write("DEBUG - Raw Docs Count:", len(docs))
+
+            if len(docs) == 0:
+                st.error("❌ Loader returned EMPTY docs list")
+                st.warning("👉 Problem is in OCR/PDF/DOCX loader, NOT app.py")
+                st.stop()
 
             # =====================================
             # SPLIT DOCUMENTS
             # =====================================
 
-            split_docs = split_documents(
-                docs
+            split_docs = split_documents(docs)
+
+            # 🔥 DEBUG 2
+            st.write("DEBUG - Split Docs Count:", len(split_docs))
+
+            if len(split_docs) == 0:
+                st.error("❌ Splitting produced 0 chunks")
+                st.stop()
+
+            # =====================================
+            # VECTORSTORE
+            # =====================================
+
+            vectorstore = create_chroma_vectorstore(
+                split_docs,
+                embeddings
             )
 
             # =====================================
-            # CREATE VECTORSTORE
+            # RETRIEVER
             # =====================================
 
-            vectorstore = (
-                create_chroma_vectorstore(
+            chroma_retriever = get_chroma_retriever(vectorstore)
 
-                    split_docs,
-
-                    embeddings
-                )
+            retriever = create_hybrid_retriever(
+                split_docs,
+                chroma_retriever
             )
 
-            # =====================================
-            # CREATE RETRIEVER
-            # =====================================
+            st.session_state.retriever = retriever
+            st.session_state.processed_files = uploaded_names
 
-            chroma_retriever = (
-                get_chroma_retriever(
-                    vectorstore
-                )
-            )
-
-            retriever = (
-                create_hybrid_retriever(
-
-                    split_docs,
-
-                    chroma_retriever
-                )
-            )
-
-            st.session_state.retriever = (
-                retriever
-            )
-
-            st.session_state.processed_files = (
-                uploaded_names
-            )
-
-        st.success(
-            "Documents Processed Successfully"
-        )
+        st.success("Documents Processed Successfully")
 
 # =========================================================
 # CLEAR CHAT
 # =========================================================
 
-if st.sidebar.button(
-    "Clear Chat"
-):
-
+if st.sidebar.button("Clear Chat"):
     st.session_state.messages = []
-
     memory.clear()
-
     st.rerun()
 
 # =========================================================
@@ -331,22 +245,14 @@ if st.sidebar.button(
 # =========================================================
 
 for message in st.session_state.messages:
-
-    with st.chat_message(
-        message["role"]
-    ):
-
-        st.markdown(
-            message["content"]
-        )
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 # =========================================================
 # USER INPUT
 # =========================================================
 
-question = st.chat_input(
-    "Ask questions from uploaded documents..."
-)
+question = st.chat_input("Ask questions from uploaded documents...")
 
 # =========================================================
 # QUESTION PROCESSING
@@ -355,59 +261,26 @@ question = st.chat_input(
 if question:
 
     st.session_state.messages.append({
-
         "role": "user",
-
         "content": question
     })
 
     with st.chat_message("user"):
-
         st.markdown(question)
 
     with st.chat_message("assistant"):
 
         if st.session_state.retriever is None:
-
-            st.warning(
-                "Please upload documents first."
-            )
+            st.warning("Please upload documents first.")
 
         else:
 
             try:
 
-                # =================================
-                # CREATE HANDLERS
-                # =================================
-
-                rewrite_handler = (
-                    QueryRewriteHandler(
-                        llm,
-                        memory
-                    )
-                )
-
-                retrieval_handler = (
-                    RetrievalHandler(
-                        st.session_state.retriever
-                    )
-                )
-
-                rerank_handler = (
-                    RerankHandler()
-                )
-
-                generation_handler = (
-                    GenerationHandler(
-                        llm,
-                        memory
-                    )
-                )
-
-                # =================================
-                # CHAIN OF RESPONSIBILITY
-                # =================================
+                rewrite_handler = QueryRewriteHandler(llm, memory)
+                retrieval_handler = RetrievalHandler(st.session_state.retriever)
+                rerank_handler = RerankHandler()
+                generation_handler = GenerationHandler(llm, memory)
 
                 rewrite_handler.set_next(
                     retrieval_handler
@@ -417,107 +290,45 @@ if question:
                     generation_handler
                 )
 
-                # =================================
-                # RUN PIPELINE
-                # =================================
-
                 result = rewrite_handler.handle({
-
                     "question": question
                 })
 
                 answer = result["answer"]
-
-                docs = result.get(
-                    "docs",
-                    []
-                )
+                docs = result.get("docs", [])
 
             except Exception as e:
-
-                st.error(
-                    f"Pipeline Error: {e}"
-                )
-
+                st.error(f"Pipeline Error: {e}")
                 st.stop()
 
-            # =================================
-            # EMPTY RESPONSE
-            # =================================
-
             if not docs:
-
-                answer = (
-                    "No relevant information found."
-                )
-
-            # =================================
-            # SAVE MEMORY
-            # =================================
+                answer = "No relevant information found."
 
             memory.save_context(
-
                 {"input": question},
-
                 {"output": answer}
             )
 
-            # =================================
-            # SHOW ANSWER
-            # =================================
-
             st.markdown(answer)
-
-            # =================================
-            # SHOW SOURCES
-            # =================================
 
             if docs:
 
-                st.markdown(
-                    "### Sources"
-                )
+                st.markdown("### Sources")
 
                 shown_sources = set()
 
                 for doc in docs[:3]:
 
-                    source = doc.metadata.get(
+                    source = doc.metadata.get("source", "Unknown File")
+                    page = doc.metadata.get("page", "N/A")
 
-                        "source",
+                    text = f"{source} — Page {page}"
 
-                        "Unknown File"
-                    )
-
-                    page = doc.metadata.get(
-
-                        "page",
-
-                        "N/A"
-                    )
-
-                    source_text = (
-                        f"{source} — Page {page}"
-                    )
-
-                    if (
-
-                        source_text
-
-                        not in shown_sources
-                    ):
-
-                        st.markdown(
-                            f"- {source_text}"
-                        )
-
-                        shown_sources.add(
-                            source_text
-                        )
+                    if text not in shown_sources:
+                        st.markdown(f"- {text}")
+                        shown_sources.add(text)
 
     st.session_state.messages.append({
-
         "role": "assistant",
-
         "content": answer
     })

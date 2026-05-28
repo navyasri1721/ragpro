@@ -1,47 +1,28 @@
-from langchain_core.documents import (
-    Document
-)
+from langchain_core.documents import Document
 
-# =====================================================
-# MANUAL DOCUMENT SPLITTER
-# =====================================================
-
-def split_documents(
-
-    documents,
-
-    chunk_size=1000,
-
-    chunk_overlap=200
-):
+def split_documents(docs):
 
     split_docs = []
 
-    for doc in documents:
+    for doc in docs:
 
         text = doc.page_content
 
-        start = 0
+        lines = text.split("\n")
 
-        while start < len(text):
+        for line in lines:
 
-            end = start + chunk_size
+            line = line.strip()
 
-            chunk_text = text[start:end]
+            if len(line) < 5:
+                continue
 
-            chunk_doc = Document(
-
-                page_content=chunk_text,
-
-                metadata=doc.metadata
-            )
-
+            # IMPORTANT: each row becomes its own chunk
             split_docs.append(
-                chunk_doc
-            )
-
-            start += (
-                chunk_size - chunk_overlap
+                Document(
+                    page_content=line,
+                    metadata=doc.metadata
+                )
             )
 
     return split_docs
