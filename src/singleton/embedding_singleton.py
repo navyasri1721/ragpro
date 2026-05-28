@@ -1,13 +1,18 @@
-from src.embeddings.hf_embeddings import CustomHFEmbeddings
+from src.embeddings.huggingface_embeddings import (
+    CustomHFEmbeddings
+)
 
 class EmbeddingSingleton:
 
     _instance = None
 
-    @staticmethod
-    def get_instance():
+    @classmethod
+    def get_instance(cls):
 
-        if EmbeddingSingleton._instance is None:
-            EmbeddingSingleton._instance = CustomHFEmbeddings().get()
+        if cls._instance is None:
 
-        return EmbeddingSingleton._instance
+            cls._instance = (
+                CustomHFEmbeddings.load_embeddings()
+            )
+
+        return cls._instance

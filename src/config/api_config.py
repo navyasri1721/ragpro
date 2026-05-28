@@ -1,11 +1,7 @@
-import os
+MODEL_NAME = "llama3-8b-8192"
 
-class APIConfig:
+PERSIST_DIRECTORY = "data/chroma_db"
 
-    @staticmethod
-    def get_groq_api_key():
-        try:
-            import streamlit as st
-            return st.secrets["GROQ_API_KEY"]
-        except:
-            return os.getenv("GROQ_API_KEY")
+CHUNK_SIZE = 1000
+
+CHUNK_OVERLAP = 200

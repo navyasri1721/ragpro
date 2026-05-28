@@ -1,21 +1,47 @@
-from langchain_core.documents import Document
-from src.preprocessing.chunker import TextChunker
+from langchain_core.documents import (
+    Document
+)
 
-def split_documents(docs):
+# =====================================================
+# MANUAL DOCUMENT SPLITTER
+# =====================================================
 
-    chunker = TextChunker()
-    final_docs = []
+def split_documents(
 
-    for d in docs:
+    documents,
 
-        chunks = chunker.chunk_text(d["content"])
+    chunk_size=1000,
 
-        for c in chunks:
-            final_docs.append(
-                Document(
-                    page_content=c,
-                    metadata={"source": d["source"]}
-                )
+    chunk_overlap=200
+):
+
+    split_docs = []
+
+    for doc in documents:
+
+        text = doc.page_content
+
+        start = 0
+
+        while start < len(text):
+
+            end = start + chunk_size
+
+            chunk_text = text[start:end]
+
+            chunk_doc = Document(
+
+                page_content=chunk_text,
+
+                metadata=doc.metadata
             )
 
-    return final_docs
+            split_docs.append(
+                chunk_doc
+            )
+
+            start += (
+                chunk_size - chunk_overlap
+            )
+
+    return split_docs
