@@ -3,3 +3,5 @@
 .env
 __pycache__/
 .streamlit/secrets.toml
+data/uploads/
+chroma_db/
