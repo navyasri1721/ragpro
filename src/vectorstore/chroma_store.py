@@ -1,150 +1,146 @@
 from langchain_chroma import Chroma
-
-from langchain_core.documents import (
-    Document
-)
-
-from src.config.api_config import (
-    PERSIST_DIRECTORY
-)
-
+from langchain_core.documents import Document
+from src.config.api_config import PERSIST_DIRECTORY
 
 # =========================================================
-# CREATE VECTORSTORE
+# SAFE METADATA CLEANER (FINAL FIX)
 # =========================================================
 
-def create_chroma_vectorstore(
+def safe_value(value):
+    """
+    Chroma ONLY accepts:
+    str | int | float | bool
+    """
 
-    documents,
+    if value is None:
+        return ""
 
-    embeddings
-):
+    if isinstance(value, (str, int, float, bool)):
+        return value
 
-    vectorstore = Chroma(
+    # convert lists/dicts safely
+    try:
+        return str(value)
+    except:
+        return ""
 
-        persist_directory=PERSIST_DIRECTORY,
 
-        embedding_function=embeddings
-    )
+def clean_metadata(metadata):
+    cleaned = {}
 
-    # =====================================================
-    # DELETE OLD FILES
-    # =====================================================
+    if not metadata:
+        return cleaned
 
-    sources = set()
-
-    for doc in documents:
-
-        source = doc.metadata.get(
-            "source"
-        )
-
-        if source:
-
-            sources.add(source)
-
-    for source in sources:
-
+    for k, v in metadata.items():
         try:
+            key = str(k)
+            cleaned[key] = safe_value(v)
+        except:
+            continue
 
-            existing = vectorstore.get(
+    return cleaned
 
-                where={
-                    "source": source
-                }
-            )
 
-            ids = existing.get(
-                "ids",
-                []
-            )
+# =========================================================
+# CREATE / UPDATE VECTORSTORE (FIXED)
+# =========================================================
 
-            if ids:
-
-                vectorstore.delete(
-                    ids=ids
-                )
-
-        except Exception as e:
-
-            print(
-                f"[DEBUG] DELETE ERROR: {e}"
-            )
-
-    # =====================================================
-    # SAFE INSERT
-    # =====================================================
+def create_chroma_vectorstore(documents, embeddings):
 
     cleaned_docs = []
 
-    for doc in documents:
+    # ===============================
+    # CLEAN DOCUMENTS SAFELY
+    # ===============================
+    for idx, doc in enumerate(documents):
 
         try:
+            content = getattr(doc, "page_content", "")
 
-            metadata = {}
+            if not content:
+                continue
 
-            for k, v in doc.metadata.items():
+            content = str(content).strip()
 
-                metadata[str(k)] = str(v)
+            metadata = clean_metadata(getattr(doc, "metadata", {}))
+
+            # SAFE DEFAULT FIELDS
+            metadata.update({
+                "source": str(metadata.get("source", "unknown")),
+                "page": str(metadata.get("page", "N/A")),
+                "type": str(metadata.get("type", "text")),
+                "chunk_id": str(idx)
+            })
 
             cleaned_docs.append(
-
                 Document(
-
-                    page_content=str(
-                        doc.page_content
-                    ),
-
+                    page_content=content,
                     metadata=metadata
                 )
             )
 
         except Exception as e:
+            print(f"[DOC CLEAN ERROR {idx}] {e}")
 
-            print(
-                f"[DEBUG] CLEAN ERROR: {e}"
-            )
+    if not cleaned_docs:
+        raise ValueError("No valid documents after cleaning.")
 
-    print(
-        f"[DEBUG] FINAL DOCS: {len(cleaned_docs)}"
+    print(f"[DEBUG] CLEAN DOCS: {len(cleaned_docs)}")
+
+    # ===============================
+    # INIT VECTORSTORE
+    # ===============================
+    vectorstore = Chroma(
+        persist_directory=PERSIST_DIRECTORY,
+        embedding_function=embeddings
     )
 
-    vectorstore.add_documents(
-        cleaned_docs
-    )
+    # ===============================
+    # SAFE BATCH INSERT (FIX CRASH)
+    # ===============================
+    BATCH_SIZE = 32
+
+    for i in range(0, len(cleaned_docs), BATCH_SIZE):
+
+        batch = cleaned_docs[i:i + BATCH_SIZE]
+
+        try:
+            vectorstore.add_documents(batch)
+        except Exception as e:
+
+            print(f"[BATCH ERROR {i}] {e}")
+
+            # fallback: insert one-by-one
+            for j, doc in enumerate(batch):
+                try:
+                    vectorstore.add_documents([doc])
+                except Exception as e2:
+                    print(f"[SKIP DOC {i+j}] {e2}")
+                    print("METADATA:", doc.metadata)
+
+    print("[DEBUG] VECTORSTORE READY")
 
     return vectorstore
 
 
 # =========================================================
-# LOAD VECTORSTORE
+# LOAD VECTORSTORE (FIXED)
 # =========================================================
 
-def load_chroma_vectorstore(
-
-    embeddings
-):
+def load_chroma_vectorstore(embeddings):
 
     return Chroma(
-
         persist_directory=PERSIST_DIRECTORY,
-
         embedding_function=embeddings
     )
 
 
 # =========================================================
-# RETRIEVER
+# RETRIEVER (FIXED SAFE DEFAULT)
 # =========================================================
 
-def get_chroma_retriever(
-
-    vectorstore
-):
+def get_chroma_retriever(vectorstore):
 
     return vectorstore.as_retriever(
-
-        search_kwargs={
-            "k": 25
-        }
+        search_kwargs={"k": 20}
     )
