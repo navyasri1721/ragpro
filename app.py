@@ -1,5 +1,8 @@
 import os
 import streamlit as st
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 # =========================================================
 # LANGCHAIN
@@ -74,7 +77,8 @@ from src.pipeline.generation_handler import (
     GenerationHandler
 )
 from src.utils.source_utils import group_by_source, pick_best_source
-
+from src.web.web_search import search_web
+from db.chat_storage import save_chat
 # =========================================================
 # STREAMLIT CONFIG
 # =========================================================
@@ -446,7 +450,6 @@ if question:
             )
 
         else:
-
             try:
 
                 # =================================
@@ -498,33 +501,155 @@ if question:
                     "question": question
                 })
 
-                docs = result.get("docs", [])
+                docs = result.get(
+                    "docs",
+                    []
+                )
 
                 answer = "Not found in document"
+
                 context_text = ""
 
-                try:
-                    if not docs:
-                        answer = "Not found in document"
+                # =====================================
+                # CHECK DOCUMENT RELEVANCE
+                # =====================================
+
+                relevant_docs = []
+                if docs:
+
+                    for doc in docs:
+
+                        content = (
+                            doc.page_content.strip()
+                        )
+
+                        # Ignore tiny chunks
+
+                        if len(content) < 80:
+                            continue
+
+                        overlap = 0
+
+                        for word in question.lower().split():
+
+                            if (
+
+                                len(word) > 3
+
+                                and
+
+                                word.lower() in content.lower()
+                            ):
+
+                                overlap += 1
+
+                        # Minimum overlap required
+
+                        if overlap >= 2:
+
+                            relevant_docs.append(
+                                doc
+                            )
+
+                # =====================================
+                # WEB SEARCH FALLBACK
+                # =====================================
+
+                if not relevant_docs:
+
+                    web_results = search_web(
+                        question
+                    )
+                    print("WEB RESULTS:")
+                    print(web_results)
+
+                    if not web_results:
+
+                        answer = (
+                            "Not found anywhere"
+                        )
+
                     else:
-                        grouped = group_by_source(docs)
-                        docs = pick_best_source(grouped, question)
 
-                        context_text = "\n".join(
-            d.page_content for d in docs if d.page_content
-        )
+                        web_context = "\n\n".join([
 
-                        if not context_text.strip():
-                            answer = "Not found in document"
-                        else:
-                            prompt = f"""
+                            f"Title: {r['title']}\n"
+                            f"Content: {r['body']}"
+
+                            for r in web_results
+                        ])
+
+                        prompt = f"""
+You are an AI assistant.
+
+Answer ONLY from the web search results.
+
+WEB RESULTS:
+{web_context}
+
+QUESTION:
+{question}
+"""
+
+                        answer = (
+                            llm.invoke(
+                                prompt
+                            ).content.strip()
+                        )
+
+                        st.markdown(
+                            "### Source Type"
+                        )
+
+                        st.write(
+                            "🌐 Web Search"
+                        )
+
+                        docs = []
+
+                # =====================================
+                # DOCUMENT RAG
+                # =====================================
+
+                else:
+
+                    grouped = group_by_source(
+                        relevant_docs
+                    )
+
+                    docs = pick_best_source(
+
+                        grouped,
+
+                        question
+                    )
+
+                    context_text = "\n".join(
+
+                        d.page_content
+
+                        for d in docs
+
+                        if d.page_content
+                    )
+
+                    if not context_text.strip():
+
+                        answer = (
+                            "Not found in document"
+                        )
+
+                    else:
+
+                        prompt = f"""
 You are a STRICT RAG SYSTEM.
 
 RULES:
 - Answer ONLY from context
 - Do NOT mix sources
 - Do NOT guess
-- If not in context → say "Not found in document"
+- If answer not in context → say:
+  "Not found in document"
 
 CONTEXT:
 {context_text}
@@ -533,84 +658,129 @@ QUESTION:
 {question}
 """
 
-                            answer = llm.invoke(prompt).content
-                except Exception as e:
-                        answer = f"Error generating answer: {str(e)}"
+                        response = (
+                            llm.invoke(
+                                prompt
+                            ).content.strip()
+                        )
+
+                        if (
+
+                            not response
+
+                            or
+
+                            "not found"
+
+                            in response.lower()
+                        ):
+
+                            answer = (
+                                "Not found in document"
+                            )
+
+                        else:
+
+                            answer = response
+
+                        st.markdown(
+                            "### Source Type"
+                        )
+
+                        st.write(
+                            "📄 Document RAG"
+                        )
+
+                # =================================
+                # SAVE MEMORY
+                # =================================
+
+                memory.save_context(
+
+                    {"input": question},
+
+                    {"output": answer}
+                )
+
+                # =================================
+                # SHOW ANSWER
+                # =================================
+
+                st.markdown(
+                    answer
+                )
+
+                # =================================
+                # SAVE CHAT TO MYSQL
+                # =================================
+
+                save_chat(
+                    question,
+                    answer
+                )
+
+                # =================================
+                # SOURCES
+                # =================================
+
+                if docs:
+
+                    st.markdown(
+                        "### Sources"
+                    )
+
+                    shown_sources = set()
+
+                    for doc in docs[:5]:
+
+                        source = doc.metadata.get(
+
+                            "source",
+
+                            "Unknown"
+                        )
+
+                        page = doc.metadata.get(
+
+                            "page",
+
+                            "N/A"
+                        )
+
+                        source_text = (
+                            f"{source} — Page {page}"
+                        )
+
+                        if (
+
+                            source_text
+
+                            not in shown_sources
+                        ):
+
+                            st.markdown(
+                                f"- {source_text}"
+                            )
+
+                            shown_sources.add(
+                                source_text
+                            )
+
+                # =================================
+                # SAVE TO SESSION
+                # =================================
+
+                st.session_state.messages.append({
+
+                    "role": "assistant",
+
+                    "content": answer
+                })
+
             except Exception as e:
-                    
+
                 st.error(
                     f"Pipeline Error: {e}"
                 )
 
                 st.stop()
-
-            # =================================
-            # SAVE MEMORY
-            # =================================
-
-            memory.save_context(
-
-                {"input": question},
-
-                {"output": answer}
-            )
-
-            # =================================
-            # SHOW ANSWER
-            # =================================
-
-            st.markdown(answer)
-
-            # =================================
-            # SOURCES
-            # =================================
-
-            if docs:
-
-                st.markdown(
-                    "### Sources"
-                )
-
-                shown_sources = set()
-
-                for doc in docs[:5]:
-
-                    source = doc.metadata.get(
-
-                        "source",
-
-                        "Unknown"
-                    )
-
-                    page = doc.metadata.get(
-
-                        "page",
-
-                        "N/A"
-                    )
-
-                    source_text = (
-                        f"{source} — Page {page}"
-                    )
-
-                    if (
-
-                        source_text
-
-                        not in shown_sources
-                    ):
-
-                        st.markdown(
-                            f"- {source_text}"
-                        )
-
-                        shown_sources.add(
-                            source_text
-                        )
-
-    st.session_state.messages.append({
-
-        "role": "assistant",
-
-        "content": answer
-    })
