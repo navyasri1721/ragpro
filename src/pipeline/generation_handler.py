@@ -66,23 +66,11 @@ class GenerationHandler:
         )
 
         # =================================================
-        # GENERIC ADVANCED PROMPT
+        # IMPROVED PROMPT
         # =================================================
 
         prompt = f"""
 You are an advanced document QA assistant.
-
-IMPORTANT RULES FOR NUMBERS:
-
-- If multiple numeric values exist:
-    - Separate them clearly
-    - Do NOT merge them
-- Identify type of value:
-    - Official = recruitment data
-    - Portal = reporting data
-    - Average = aggregated value (NOT always eligibility)
-- Never present ONLY one value if multiple exist
-- Always label values clearly
 
 You MUST answer ONLY from the provided context.
 
@@ -98,16 +86,6 @@ RULES:
 - Keep answers concise
 - If truly absent, say:
   Not found in document
-  comparison_keywords = [
-    "highest",
-    "lowest",
-    "most",
-    "least",
-    "maximum",
-    "minimum",
-    "top",
-    "best"
-]
 
 CONTEXT:
 {context}
@@ -117,8 +95,9 @@ QUESTION:
 
 ANSWER:
 """
+
         # =================================================
-        # LLM RESPONSE
+        # LLM
         # =================================================
 
         response = self.llm.invoke(
@@ -138,32 +117,6 @@ ANSWER:
         )
 
         answer = answer.strip()
-
-        # =================================================
-        # CLEANUP
-        # =================================================
-
-        answer = answer.replace(
-            "Answer:",
-            ""
-        )
-
-        answer = answer.replace(
-            "ANSWER:",
-            ""
-        )
-
-        answer = answer.strip()
-
-        # =================================================
-        # EMPTY RESPONSE SAFETY
-        # =================================================
-
-        if not answer:
-
-            answer = (
-                "Not found in document"
-            )
 
         return {
 
