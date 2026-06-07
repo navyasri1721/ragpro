@@ -1,5 +1,5 @@
-from duckduckgo_search import DDGS
 
+from duckduckgo_search import DDGS
 
 def search_web(query):
 
@@ -9,35 +9,25 @@ def search_web(query):
 
         with DDGS() as ddgs:
 
-            response = ddgs.text(
-                query,
-                max_results=5
+            web_results = list(
+                ddgs.text(
+                    query,
+                    max_results=5
+                )
             )
 
-            for r in response:
+            for r in web_results:
 
                 results.append({
 
-                    "title": r.get(
-                        "title",
-                        ""
-                    ),
+                    "title": r.get("title", ""),
+                    "body": r.get("body", ""),
+                    "href": r.get("href", "")
 
-                    "body": r.get(
-                        "body",
-                        ""
-                    ),
-
-                    "href": r.get(
-                        "href",
-                        ""
-                    )
                 })
 
     except Exception as e:
 
-        print(
-            f"WEB SEARCH ERROR: {e}"
-        )
+        print(f"WEB SEARCH ERROR: {e}")
 
     return results

@@ -1,8 +1,12 @@
 import os
 import streamlit as st
 import sys
+import re
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+from groq import Groq
+from streamlit_mic_recorder import mic_recorder
+import tempfile
 
 # =========================================================
 # LANGCHAIN
@@ -97,7 +101,12 @@ st.title(
 # =========================================================
 # LLM
 # =========================================================
+groq_client = Groq(
 
+    api_key=st.secrets[
+        "GROQ_API_KEY"
+    ]
+)
 llm = ChatGroq(
 
     groq_api_key=st.secrets[
@@ -419,10 +428,99 @@ for message in st.session_state.messages:
 # =========================================================
 # USER INPUT
 # =========================================================
+# =========================================================
+# VOICE INPUT
+# =========================================================
 
-question = st.chat_input(
+voice_data = mic_recorder(
+
+    start_prompt="🎤 Start Recording",
+
+    stop_prompt="⏹ Stop Recording",
+
+    key="voice_recorder"
+)
+
+voice_question = None
+
+if voice_data:
+
+    with tempfile.NamedTemporaryFile(
+
+        delete=False,
+
+        suffix=".wav"
+    ) as temp_audio:
+
+        temp_audio.write(
+            voice_data["bytes"]
+        )
+
+        temp_audio_path = (
+            temp_audio.name
+        )
+
+    with open(
+        temp_audio_path,
+        "rb"
+    ) as audio_file:
+
+        transcription = (
+            groq_client.audio.transcriptions.create(
+
+                file=audio_file,
+
+                model="whisper-large-v3"
+            )
+        )
+
+    voice_question = (
+        transcription.text
+    )
+
+    st.success(
+        f"Voice Input: {voice_question}"
+    )
+typed_question = st.chat_input(
     "Ask questions from documents..."
 )
+
+question = (
+
+    typed_question
+
+    if typed_question
+
+    else voice_question
+)
+web_keywords = [
+
+    "weather",
+    "ceo",
+    "today",
+    "news",
+    "current",
+    "latest",
+    "stock",
+    "price",
+    "share",
+    "market",
+    "president",
+    "prime minister",
+    "founder",
+    "owner"
+]
+
+force_web = False
+
+if question:
+
+    force_web = any(
+
+        word in question.lower()
+
+        for word in web_keywords
+    )
 
 # =========================================================
 # QUESTION PROCESSING
@@ -442,14 +540,6 @@ if question:
         st.markdown(question)
 
     with st.chat_message("assistant"):
-
-        if st.session_state.retriever is None:
-
-            st.warning(
-                "No documents available in database."
-            )
-
-        else:
             try:
 
                 # =================================
@@ -496,15 +586,20 @@ if question:
                 # RUN
                 # =================================
 
-                result = rewrite_handler.handle({
+                docs = []
 
-                    "question": question
-                })
+# =================================
+# RUN RAG ONLY IF RETRIEVER EXISTS
+# =================================
 
-                docs = result.get(
-                    "docs",
-                    []
-                )
+                if st.session_state.retriever is not None:
+                    result = rewrite_handler.handle({
+                        "question": question
+                        })
+                    docs = result.get(
+        "docs",
+        []
+    )
 
                 answer = "Not found in document"
 
@@ -516,7 +611,29 @@ if question:
 
                 relevant_docs = []
                 if docs:
-
+                    stop_words = {
+    "what",
+    "who",
+    "is",
+    "the",
+    "of",
+    "does",
+    "today",
+    "current",
+    "tell",
+    "about",
+    "explain",
+    "which",
+    "company"
+}
+                    question_words = set(
+            re.findall(r'\w+', question.lower())
+        )    
+                    filtered_words = {
+        word
+        for word in question_words
+        if word not in stop_words and len(word) > 2
+    }
                     for doc in docs:
 
                         content = (
@@ -525,49 +642,36 @@ if question:
 
                         # Ignore tiny chunks
 
-                        if len(content) < 80:
+                        if len(content) < 40:
                             continue
 
-                        overlap = 0
+                        content_words = set(
+            re.findall(r'\w+', content.lower())
+        )
+       
+                        overlap = len(
+            filtered_words.intersection(content_words)
+        )
+                        if overlap >= 0:
+                            relevant_docs.append(doc)     
 
-                        for word in question.lower().split():
-
-                            if (
-
-                                len(word) > 3
-
-                                and
-
-                                word.lower() in content.lower()
-                            ):
-
-                                overlap += 1
-
-                        # Minimum overlap required
-
-                        if overlap >= 2:
-
-                            relevant_docs.append(
-                                doc
-                            )
+                if force_web:
+                    relevant_docs = []
 
                 # =====================================
                 # WEB SEARCH FALLBACK
                 # =====================================
 
-                if not relevant_docs:
-
+                if force_web or not relevant_docs:
+                    question = question.strip().lower()
                     web_results = search_web(
                         question
                     )
                     print("WEB RESULTS:")
                     print(web_results)
 
-                    if not web_results:
-
-                        answer = (
-                            "Not found anywhere"
-                        )
+                    if not web_results or len(web_results) == 0:
+                        answer = "Could not find reliable web results."
 
                     else:
 
@@ -580,15 +684,25 @@ if question:
                         ])
 
                         prompt = f"""
-You are an AI assistant.
+You are a helpful AI assistant.
 
-Answer ONLY from the web search results.
+Use the WEB RESULTS below to answer the QUESTION.
+
+Rules:
+- Extract exact factual answer from results.
+- Keep answer short and direct.
+- If asking about a CEO, return the CEO name clearly.
+- Do not hallucinate.
+- If answer missing, say:
+  "Not found on web."
 
 WEB RESULTS:
 {web_context}
 
 QUESTION:
 {question}
+
+ANSWER:
 """
 
                         answer = (
@@ -642,13 +756,14 @@ QUESTION:
                     else:
 
                         prompt = f"""
-You are a STRICT RAG SYSTEM.
+You are a helpful RAG assistant.
 
 RULES:
-- Answer ONLY from context
-- Do NOT mix sources
-- Do NOT guess
-- If answer not in context → say:
+- Answer ONLY using the document context.
+- If the answer is partially available, summarize it clearly.
+- If exact wording is not present but meaning is clear, answer naturally.
+- Do NOT invent facts outside context.
+- If answer truly does not exist, say:
   "Not found in document"
 
 CONTEXT:
@@ -656,6 +771,8 @@ CONTEXT:
 
 QUESTION:
 {question}
+
+ANSWER:
 """
 
                         response = (
