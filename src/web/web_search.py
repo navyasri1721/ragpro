@@ -1,33 +1,28 @@
+from tavily import TavilyClient
+import streamlit as st
 
-from duckduckgo_search import DDGS
+tavily = TavilyClient(api_key=st.secrets["TAVILY_API_KEY"])
 
 def search_web(query):
-
-    results = []
-
     try:
+        response = tavily.search(
+            query=query,
+            search_depth="advanced",
+            max_results=5
+        )
 
-        with DDGS() as ddgs:
+        results = []
 
-            web_results = list(
-                ddgs.text(
-                    query,
-                    max_results=5
-                )
-            )
+        for r in response.get("results", []):
 
-            for r in web_results:
+            results.append({
+                "title": r.get("title", ""),
+                "body": r.get("content", ""),
+                "url": r.get("url", "")
+            })
 
-                results.append({
-
-                    "title": r.get("title", ""),
-                    "body": r.get("body", ""),
-                    "href": r.get("href", "")
-
-                })
+        return results
 
     except Exception as e:
-
-        print(f"WEB SEARCH ERROR: {e}")
-
-    return results
+        print("Tavily error:", e)
+        return []

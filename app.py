@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 from groq import Groq
 from streamlit_mic_recorder import mic_recorder
 import tempfile
+from db.mysql_search import search_mysql
 
 # =========================================================
 # LANGCHAIN
@@ -429,6 +430,41 @@ for message in st.session_state.messages:
 # USER INPUT
 # =========================================================
 # =========================================================
+# SELECT SPEAKING LANGUAGE
+# =========================================================
+
+selected_language = st.selectbox(
+
+    "Select Speaking Language",
+
+    [
+        "English",
+        "Telugu",
+        "Hindi",
+        "Tamil",
+        "Kannada",
+        "Malayalam"
+    ]
+)
+
+language_map = {
+
+    "English": "en",
+
+    "Telugu": "te",
+
+    "Hindi": "hi",
+
+    "Tamil": "ta",
+
+    "Kannada": "kn",
+
+    "Malayalam": "ml"
+}
+
+selected_language_code = language_map[selected_language]
+st.write(f"Selected Language: {selected_language}")
+# =========================================================
 # VOICE INPUT
 # =========================================================
 
@@ -466,17 +502,36 @@ if voice_data:
     ) as audio_file:
 
         transcription = (
-            groq_client.audio.transcriptions.create(
+    groq_client.audio.transcriptions.create(
 
-                file=audio_file,
+        file=audio_file,
 
-                model="whisper-large-v3"
-            )
-        )
+        model="whisper-large-v3",
+
+        language=selected_language_code
+    )
+)
 
     voice_question = (
         transcription.text
     )
+    translation_prompt = f"""
+Translate the following user query into simple English.
+Preserve meaning exactly.
+
+TEXT:
+{voice_question}
+
+Only return translated English text.
+"""
+    if selected_language != "English":
+        translated_question = llm.invoke(
+        translation_prompt
+    ).content.strip()
+        voice_question = translated_question
+    st.info(
+    f"Detected Voice Text: {transcription.text}"
+)
 
     st.success(
         f"Voice Input: {voice_question}"
@@ -652,21 +707,122 @@ if question:
                         overlap = len(
             filtered_words.intersection(content_words)
         )
-                        if overlap >= 0:
+                        if overlap >= 1:
                             relevant_docs.append(doc)     
 
                 if force_web:
                     relevant_docs = []
+            
+                                               # =====================================
+                # MYSQL DATABASE SEARCH
+                # =====================================
 
+                mysql_results = []
+
+                if not relevant_docs:
+
+                    mysql_results = search_mysql(question)
+
+                    if mysql_results:
+
+                        row = mysql_results[0]
+
+                        answer_parts = []
+
+                        lower_question = question.lower()
+
+                        # -----------------------------
+                        # CEO QUESTIONS
+                        # -----------------------------
+                        if "ceo" in lower_question:
+
+                            ceo = row.get("ceo")
+
+                            if ceo:
+
+                                answer_parts.append(
+                                    f"CEO: {ceo}"
+                                )
+
+                        # -----------------------------
+                        # PACKAGE QUESTIONS
+                        # -----------------------------
+                        elif "package" in lower_question:
+
+                            package = row.get("package_lpa")
+
+                            if package:
+
+                                answer_parts.append(
+                                    f"Package: {package} LPA"
+                                )
+
+                        # -----------------------------
+                        # CGPA QUESTIONS
+                        # -----------------------------
+                        elif "cgpa" in lower_question:
+
+                            cgpa = row.get("cgpa_required")
+
+                            if cgpa:
+
+                                answer_parts.append(
+                                    f"CGPA Required: {cgpa}"
+                                )
+
+                        # -----------------------------
+                        # INTERVIEW QUESTIONS
+                        # -----------------------------
+                        elif "interview" in lower_question:
+
+                            focus = row.get("interview_focus")
+
+                            if focus:
+
+                                answer_parts.append(
+                                    f"Interview Focus: {focus}"
+                                )
+
+                        # -----------------------------
+                        # DEFAULT COMPANY INFO
+                        # -----------------------------
+                        else:
+
+                            company = row.get("company_name")
+
+                            if company:
+
+                                answer_parts.append(
+                                    f"Company: {company}"
+                                )
+
+                        # -----------------------------
+                        # FINAL ANSWER
+                        # -----------------------------
+                        if answer_parts:
+
+                            answer = "\n".join(answer_parts)
+
+                            st.markdown(
+                                "### Source Type"
+                            )
+
+                            st.write(
+                                "🗄️ MySQL Database"
+                            )
+
+                            docs = []
+
+                        else:
+
+                            mysql_results = []
                 # =====================================
                 # WEB SEARCH FALLBACK
                 # =====================================
 
-                if force_web or not relevant_docs:
-                    question = question.strip().lower()
-                    web_results = search_web(
-                        question
-                    )
+                if not relevant_docs and not mysql_results:
+                    web_results = search_web(question)
+                    
                     print("WEB RESULTS:")
                     print(web_results)
 
@@ -725,7 +881,7 @@ ANSWER:
                 # DOCUMENT RAG
                 # =====================================
 
-                else:
+                elif relevant_docs:
 
                     grouped = group_by_source(
                         relevant_docs
