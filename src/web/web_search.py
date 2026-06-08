@@ -1,8 +1,6 @@
 from tavily import TavilyClient
 import streamlit as st
-
 tavily = TavilyClient(api_key=st.secrets["TAVILY_API_KEY"])
-
 def search_web(query):
     try:
         response = tavily.search(
@@ -24,5 +22,5 @@ def search_web(query):
         return results
 
     except Exception as e:
-        print("Tavily error:", e)
+        print("Tavily error occured:", e)
         return []
